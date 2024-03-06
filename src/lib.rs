@@ -54,17 +54,17 @@
 
 // HEADUPS: Keep that ^^ in sync with README.md
 
-use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::sync::Arc;
 use std::thread;
 
+pub use comms::{LockedReceiver, Receiver, ReceiverIntoIterator, Sender};
 pub use filter::Filter;
 pub use map::Mapper;
 pub use multiplex::Multiplex;
-pub use comms::{LockedReceiver, Receiver, ReceiverIntoIterator, Sender};
 
 mod comms {
     use std::cell::RefCell;
@@ -102,7 +102,8 @@ mod comms {
         ///
         /// Panics on failure to send
         pub fn flush(&self) {
-            let old_buffer = self.buffer
+            let old_buffer = self
+                .buffer
                 .replace(VecDeque::with_capacity(self.config.batch_size));
             if !old_buffer.is_empty() {
                 self.tx.send(old_buffer).expect("failed send");
@@ -290,7 +291,8 @@ mod comms {
 
         fn next(&mut self) -> Option<T> {
             if self.buffer.is_empty() {
-                match self.lockbox
+                match self
+                    .lockbox
                     .lock()
                     .expect("failed unwrap mutex")
                     .recv_buff()
@@ -875,9 +877,8 @@ mod map {
         }
     }
 
-    impl<In, Out, Func> Copy for Mapper<In, Out, Func>
-    where
-        Func: Fn(In) -> Out + Copy,
+    impl<In, Out, Func> Copy for Mapper<In, Out, Func> where
+        Func: Fn(In) -> Out + Copy
     {
     }
 }
@@ -931,7 +932,10 @@ mod multiplex {
     // work around https://github.com/rust-lang/rust/issues/28229
     // (functions implement Copy but not Clone). This is only necessary for the older-style
     // Multiplex
-    #![cfg_attr(feature = "cargo-clippy", allow(clippy::expl_impl_clone_on_copy))]
+    #![cfg_attr(
+        feature = "cargo-clippy",
+        allow(clippy::expl_impl_clone_on_copy)
+    )]
 
     use std::marker::PhantomData;
     use std::thread;
@@ -1049,7 +1053,6 @@ mod multiplex {
             }
         }
     }
-
 }
 
 #[cfg(test)]

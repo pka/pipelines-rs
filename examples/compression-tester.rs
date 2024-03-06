@@ -17,8 +17,8 @@ use std::io::Cursor;
 use std::io::Read;
 use std::process::exit;
 
-use flate2::Compression;
 use flate2::read::ZlibEncoder;
+use flate2::Compression;
 use humansize::{file_size_opts, FileSize};
 
 use pipelines::{Pipeline, PipelineConfig};

@@ -2,11 +2,11 @@ extern crate clap;
 extern crate pipelines;
 
 use std::ffi::OsString;
-use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::io::stderr;
+use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::process::{exit, Command, Stdio};
-use std::thread;
 use std::sync::Mutex;
+use std::thread;
 
 use clap::{App, Arg};
 use pipelines::{Pipeline, PipelineConfig};
@@ -108,16 +108,16 @@ fn main() {
     let sort_cmd = Mutex::new(sort_cmd);
 
     // prime the pipeline with our stdin
-    let pl =
-        Pipeline::new(|tx| {
-            let stdin = io::stdin();
-            let locked = stdin.lock();
-            for line in locked.split(b'\n') {
-                // TODO check if result is eof?
-                let line = line.expect("bad line in generator");
-                tx.send(line);
-            }
-        }).configure(PipelineConfig::default().batch_size(100).buff_size(100));
+    let pl = Pipeline::new(|tx| {
+        let stdin = io::stdin();
+        let locked = stdin.lock();
+        for line in locked.split(b'\n') {
+            // TODO check if result is eof?
+            let line = line.expect("bad line in generator");
+            tx.send(line);
+        }
+    })
+    .configure(PipelineConfig::default().batch_size(100).buff_size(100));
 
     // execute the mappers
     let pl = pl.ppipe(nmappers, move |tx, rx| {
