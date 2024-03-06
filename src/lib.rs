@@ -90,7 +90,7 @@ mod comms {
         /// Transmit a value to the next stage in the pipeline
         ///
         /// Panics on failure
-        pub fn send(&self, out: Out) -> () {
+        pub fn send(&self, out: Out) {
             let new_len = {
                 let mut buff = self.buffer.borrow_mut();
                 buff.push_back(out);
@@ -107,7 +107,7 @@ mod comms {
         pub fn flush(&self) {
             let old_buffer = self.buffer
                 .replace(VecDeque::with_capacity(self.config.batch_size));
-            if old_buffer.len() > 0 {
+            if !old_buffer.is_empty() {
                 self.tx.send(old_buffer).expect("failed send");
             }
         }
@@ -140,7 +140,7 @@ mod comms {
         fn clone(&self) -> Self {
             Self {
                 tx: self.tx.clone(),
-                config: self.config.clone(),
+                config: self.config,
                 buffer: RefCell::new(VecDeque::with_capacity(
                     self.config.buff_size,
                 )),
@@ -186,7 +186,7 @@ mod comms {
             // now we should have data in the buffer and can use it
             if current_len == 0 {
                 // I guess we got an empty VecDeque? this shouldn't happen
-                return None;
+                None
             } else {
                 return self.buffer.get_mut().pop_front();
             }
@@ -209,9 +209,9 @@ mod comms {
                 Ok(val) => {
                     // return the one we just received. this leaves our own 0-sized buffer in place
                     // but that's okay
-                    return Some(val);
+                    Some(val)
                 }
-                Err(_recv_err) => return None,
+                Err(_recv_err) => None,
             }
         }
     }
@@ -237,7 +237,7 @@ mod comms {
         type Item = In;
 
         fn next(&mut self) -> Option<In> {
-            if self.buffer.len() == 0 {
+            if self.buffer.is_empty() {
                 // buffer is empty. fill it
                 match self.iter.next() {
                     Some(buff) => {
@@ -248,7 +248,7 @@ mod comms {
                     }
                 }
             }
-            return self.buffer.pop_front();
+            self.buffer.pop_front()
         }
     }
 
@@ -292,7 +292,7 @@ mod comms {
         type Item = T;
 
         fn next(&mut self) -> Option<T> {
-            if self.buffer.len() == 0 {
+            if self.buffer.is_empty() {
                 match self.lockbox
                     .lock()
                     .expect("failed unwrap mutex")
@@ -304,7 +304,7 @@ mod comms {
                     }
                 }
             }
-            return self.buffer.pop_front();
+            self.buffer.pop_front()
         }
     }
 }
@@ -386,7 +386,7 @@ where
     /// ```
     pub fn new<F>(func: F) -> Self
     where
-        F: FnOnce(Sender<Output>) -> () + Send + 'static,
+        F: FnOnce(Sender<Output>) + Send + 'static,
     {
         let config = PipelineConfig::default();
         let (tx, rx) = Sender::pair(config);
@@ -472,16 +472,16 @@ where
     /// ```
     pub fn pipe<EntryOut, Func>(self, func: Func) -> Pipeline<EntryOut>
     where
-        Func: FnOnce(Sender<EntryOut>, Receiver<Output>) -> () + Send + 'static,
+        Func: FnOnce(Sender<EntryOut>, Receiver<Output>) + Send + 'static,
         EntryOut: Send,
     {
-        let config = self.config.clone();
-        let (tx, rx) = Sender::pair(config.clone());
+        let config = self.config;
+        let (tx, rx) = Sender::pair(config);
         thread::spawn(move || {
             func(tx, self.rx);
         });
 
-        Pipeline { rx, config: config }
+        Pipeline { rx, config }
     }
 
     /// Similar to `pipe`, but with multiple workers that will pull from a shared queue
@@ -512,7 +512,7 @@ where
         func: Func,
     ) -> Pipeline<EntryOut>
     where
-        Func: Fn(Sender<EntryOut>, LockedReceiver<Output>) -> ()
+        Func: Fn(Sender<EntryOut>, LockedReceiver<Output>)
             + Send
             + Sync
             + 'static,
@@ -520,10 +520,10 @@ where
         EntryOut: Send,
     {
         // we want a final `master_tx` which everyone will send to, and that we will return
-        let (master_tx, master_rx) = Sender::pair(self.config.clone());
+        let (master_tx, master_rx) = Sender::pair(self.config);
 
         // and then a shared rx that everyone will draw from
-        let (chan_tx, chan_rx) = Sender::pair(self.config.clone());
+        let (chan_tx, chan_rx) = Sender::pair(self.config);
         let chan_rx = LockedReceiver::new(chan_rx);
 
         // so we can send copies into the various threads
@@ -557,7 +557,7 @@ where
 
         Pipeline {
             rx: master_rx,
-            config: config,
+            config,
         }
     }
 
@@ -699,7 +699,7 @@ where
             // gather up all of the values and group them by key
             let mut by_key: HashMap<OutKey, Vec<OutValue>> = HashMap::new();
             for (key, value) in rx {
-                by_key.entry(key).or_insert_with(Vec::new).push(value)
+                by_key.entry(key).or_default().push(value)
             }
 
             // now that we have them all grouped by key, we can run the reducer on the groups
@@ -726,7 +726,7 @@ where
         EntryOut: Send,
     {
         let func = Arc::new(func);
-        let pl_config = self.config.clone();
+        let pl_config = self.config;
 
         self.pipe(move |tx, rx| {
             // build up the reducer threads
@@ -820,7 +820,7 @@ where
 
 /// A trait for structs that may be used as `Pipeline` entries
 pub trait PipelineEntry<In, Out> {
-    fn process<I: IntoIterator<Item = In>>(self, tx: Sender<Out>, rx: I) -> ();
+    fn process<I: IntoIterator<Item = In>>(self, tx: Sender<Out>, rx: I);
 }
 
 mod map {
@@ -872,6 +872,7 @@ mod map {
     where
         Func: Fn(In) -> Out + Copy,
     {
+        #[allow(clippy::non_canonical_clone_impl)]
         fn clone(&self) -> Self {
             Mapper::new(self.func)
         }
@@ -933,7 +934,7 @@ mod multiplex {
     // work around https://github.com/rust-lang/rust/issues/28229
     // (functions implement Copy but not Clone). This is only necessary for the older-style
     // Multiplex
-    #![cfg_attr(feature = "cargo-clippy", allow(expl_impl_clone_on_copy))]
+    #![cfg_attr(feature = "cargo-clippy", allow(clippy::expl_impl_clone_on_copy))]
 
     use std::marker::PhantomData;
     use std::thread;
